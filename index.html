@@ -15,7 +15,21 @@
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
-main { max-width:640px; margin:0 auto; padding:24px 16px; }
+main { max-width:1100px; margin:0 auto; padding:24px 16px; }
+.grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:16px; }
+@media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+.grid section { margin-top:0; }
+h2 { font-size:14px; margin:0 0 8px; color:var(--sub); font-weight:600; }
+#topicNow { font-size:18px; font-weight:600; overflow-wrap:anywhere; }
+#advice { display:flex; flex-direction:column; gap:12px; }
+.card { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:12px 14px; }
+.card .ans { white-space:pre-wrap; overflow-wrap:anywhere; font-size:17px; line-height:1.7; }
+#feed { max-height:50vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
+#feed p { margin:0 0 4px; }
+#feed time, #marks time { color:var(--sub); font-size:12px; margin-right:6px; }
+#feed b { color:var(--accent); margin-right:6px; }
+#marks { margin:0; padding:0; list-style:none; font-size:14px; }
+#marks li { padding:3px 0; overflow-wrap:anywhere; }
 h1 { font-size:22px; margin:0 0 4px; }
 .sub { color:var(--sub); font-size:14px; }
 .warn { color:var(--warn); font-weight:600; }
@@ -29,16 +43,13 @@ button.stop { background:var(--bad); }
 @media (prefers-color-scheme: dark) { button { color:#0d1a1a; } }
 #state { margin-top:12px; font-size:16px; }
 #interim { color:var(--sub); min-height:1.6em; font-size:14px; margin-top:6px; }
-#log { max-height:40vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
-#log p { margin:0 0 4px; }
-#log time { color:var(--sub); font-size:12px; margin-right:6px; }
 ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
 </style>
 </head>
 <body>
 <main>
   <h1>会議のマイク</h1>
-  <div class="sub">自分の声を、名前つきで文字にして会議の記録へ送ります。</div>
+  <div class="sub">自分の声を、名前つきで文字にして会議の記録へ送ります。全員の発言とクロエの助言も、ここで見られます。</div>
 
   <section id="badlink" hidden>
     <div class="bad">このページの URL が足りません。会議の担当者から届いた URL を、そのまま全部開いてください（「#」のあとまで含めて）。</div>
@@ -52,6 +63,18 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
     <div id="interim"></div>
   </section>
 
+  <div id="boardArea" hidden>
+  <section style="margin-bottom:16px"><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
+    <div id="boardState" class="sub"></div></section>
+  <div class="grid">
+    <section><h2>全員の発言</h2><div id="feed"><div class="sub">（まだありません）</div></div></section>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <section><h2>クロエの助言</h2><div id="advice"><div class="sub">（まだありません）</div></div></section>
+      <section><h2>議題・決定・宿題</h2><ul id="marks"></ul></section>
+    </div>
+  </div>
+  </div>
+
   <section>
     <div class="sub" style="font-weight:600">使い方</div>
     <ul>
@@ -59,13 +82,10 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
       <li>会議の間は、このタブを開いたままにしてください（別のタブを見ても大丈夫です）。PC のふたは閉じないでください。</li>
       <li>拾うのは、PC の近くで話した声だけです。ほかの人の声はほとんど入りません。</li>
       <li>音声は、Chrome の音声認識の仕組みで Google に送られて文字になります。</li>
+      <li>全員の発言・クロエの助言は、数秒おくれて出ます。見るだけなら、文字起こしを始めなくても大丈夫です。</li>
     </ul>
   </section>
 
-  <section>
-    <div class="sub" style="font-weight:600">送った文字（この PC の中だけに表示）</div>
-    <div id="log"></div>
-  </section>
 </main>
 <script>
 'use strict';
@@ -103,8 +123,6 @@ function addSegment(text) {
   text = text.trim();
   if (!text) return;
   queue.push({kind: 'seg', text, id: Date.now().toString(36) + '-' + (seq++) + '-' + Math.random().toString(36).slice(2, 6)});
-  const p = document.createElement('p'), t = document.createElement('time');
-  t.textContent = new Date().toTimeString().slice(0, 5); p.append(t, text); $('log').prepend(p);
   flush();
 }
 function report() { if (OK_LINK && name()) send({kind: 'status', state: micState, error: micError, heard, sent, browser: BROWSER}).catch(() => {}); }
@@ -149,7 +167,38 @@ function startRec() {
 }
 function ui() { $('mic').textContent = running ? '文字起こしを止める' : '文字起こしを始める'; $('mic').classList.toggle('stop', running); $('who').disabled = running; }
 
+// ---- 全員の発言・助言（Mac の会議のクロエの画面の写しを、数秒おきに読む） ----
+const LABEL = {judge:'判定', research:'調査', ask:'質問', topic:'議題', decision:'決定', todo:'宿題'};
+let boardUpdated = '', boardFails = 0;
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function renderBoard(b) {
+  const feed = $('feed'), stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  feed.replaceChildren(...(b.segments.length ? b.segments.map(x => { const p = el('p'); p.append(el('time', '', x.t)); if (x.speaker) p.append(el('b', '', x.speaker)); p.append(document.createTextNode(x.text)); return p; })
+    : [el('div', 'sub', '（まだありません）')]));
+  if (stick) feed.scrollTop = feed.scrollHeight;
+  const adv = b.advice.slice().reverse().map(a => { const c = el('div', 'card'); c.append(el('div', 'sub', a.t + '　' + (LABEL[a.kind] || '') + (a.question ? '：' + a.question : '')));
+    c.append(el('div', 'ans', a.ok ? a.answer : '答えを出せませんでした')); return c; });
+  if (b.busy) adv.unshift(el('div', 'sub', 'クロエが考えています…'));
+  $('advice').replaceChildren(...(adv.length ? adv : [el('div', 'sub', '（まだありません）')]));
+  $('marks').replaceChildren(...b.marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }));
+  const topic = b.marks.filter(m => m.kind === 'topic').pop();
+  $('topicNow').textContent = topic ? topic.text : '（まだ始まっていません）'; $('topicNow').className = topic ? '' : 'sub';
+  const on = (b.members || []).filter(m => m.state === 'listening').map(m => m.name);
+  $('boardState').textContent = on.length ? 'マイクを使っている人：' + on.join('、') : '';
+}
+async function pollBoard() {
+  try {
+    const r = await fetch(ENDPOINT + '?' + new URLSearchParams({k: KEY, date: today(), view: 'board'}), {cache: 'no-store'});
+    const j = await r.json();
+    boardFails = 0;
+    if (!j.ok) return;
+    if (!j.board) { $('boardState').textContent = '会議のクロエ（Mac）が、まだ始まっていません'; return; }
+    if (j.updated !== boardUpdated) { boardUpdated = j.updated; renderBoard(JSON.parse(j.board)); }
+  } catch (e) { if (++boardFails >= 3) $('boardState').textContent = '全員の発言を読み込めません（通信を確かめてください）'; }
+}
+
 if (!OK_LINK) { $('badlink').hidden = false; $('panel').hidden = true; }
+else { $('boardArea').hidden = false; pollBoard(); setInterval(pollBoard, 4000); }
 try { $('who').value = localStorage.getItem('meeting-mic-name') || ''; } catch (e) {}
 $('mic').onclick = () => {
   if (!running && !name()) { $('who').focus(); showState('先に名前を入れてください', 'warn'); return; }
