@@ -168,7 +168,7 @@ function startRec() {
 function ui() { $('mic').textContent = running ? '文字起こしを止める' : '文字起こしを始める'; $('mic').classList.toggle('stop', running); $('who').disabled = running; }
 
 // ---- 全員の発言・助言（Mac の会議のクロエの画面の写しを、数秒おきに読む） ----
-const LABEL = {judge:'判定', research:'調査', ask:'質問', topic:'議題', decision:'決定', todo:'宿題'};
+const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', topic:'議題', decision:'決定', todo:'宿題'};
 let boardUpdated = '', boardFails = 0;
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function renderBoard(b) {
