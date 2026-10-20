@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>会議のマイク</title>
+<!-- 会議のクロエ（docs/meeting-live.md の「設定なしのメンバー用ページ」）。原本は AI-CHLOE の scripts/meeting/live/cloud_page.html。
+     各自の PC の Chrome で開き、名前を入れて、自分のマイクで自分の声を文字にする。文字は、URL の # のあとに書かれた送り先（健一さんの Apps Script）へだけ送る。
+     このページ自体には、会議の内容・送り先・合言葉を置かない（# のあとは GitHub に送られない） -->
+<style>
+:root { --bg:#f6f5f2; --panel:#fff; --ink:#1f2328; --sub:#667085; --line:#e2e0da; --accent:#0f6e6e; --warn:#b45309; --bad:#b42318; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#16181c; --panel:#1f2227; --ink:#e8e6e1; --sub:#9aa3b2; --line:#30343b; --accent:#4fc3c3; --warn:#f0a84b; --bad:#f97066; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+main { max-width:640px; margin:0 auto; padding:24px 16px; }
+h1 { font-size:22px; margin:0 0 4px; }
+.sub { color:var(--sub); font-size:14px; }
+.warn { color:var(--warn); font-weight:600; }
+.bad { color:var(--bad); font-weight:600; }
+.ok { color:var(--accent); font-weight:600; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+label { display:block; font-weight:600; margin-bottom:6px; }
+input[type=text] { width:100%; padding:12px; font:inherit; font-size:18px; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; }
+button { width:100%; margin-top:12px; padding:14px; font:inherit; font-size:18px; font-weight:700; color:#fff; background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+button.stop { background:var(--bad); }
+@media (prefers-color-scheme: dark) { button { color:#0d1a1a; } }
+#state { margin-top:12px; font-size:16px; }
+#interim { color:var(--sub); min-height:1.6em; font-size:14px; margin-top:6px; }
+#log { max-height:40vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
+#log p { margin:0 0 4px; }
+#log time { color:var(--sub); font-size:12px; margin-right:6px; }
+ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>会議のマイク</h1>
+  <div class="sub">自分の声を、名前つきで文字にして会議の記録へ送ります。</div>
+
+  <section id="badlink" hidden>
+    <div class="bad">このページの URL が足りません。会議の担当者から届いた URL を、そのまま全部開いてください（「#」のあとまで含めて）。</div>
+  </section>
+
+  <section id="panel">
+    <label for="who">あなたの名前（名字だけで大丈夫です）</label>
+    <input type="text" id="who" maxlength="20" autocomplete="off" placeholder="例：大森">
+    <button id="mic">文字起こしを始める</button>
+    <div id="state" class="sub">停止中</div>
+    <div id="interim"></div>
+  </section>
+
+  <section>
+    <div class="sub" style="font-weight:600">使い方</div>
+    <ul>
+      <li>初めてのときは、マイクの使用を聞かれます。「許可する」を押してください。</li>
+      <li>会議の間は、このタブを開いたままにしてください（別のタブを見ても大丈夫です）。PC のふたは閉じないでください。</li>
+      <li>拾うのは、PC の近くで話した声だけです。ほかの人の声はほとんど入りません。</li>
+      <li>音声は、Chrome の音声認識の仕組みで Google に送られて文字になります。</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sub" style="font-weight:600">送った文字（この PC の中だけに表示）</div>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+// URL の # のあと：<Apps Script のデプロイ ID>~<合言葉>
+const [DEPLOY, KEY] = decodeURIComponent(location.hash.slice(1)).split('~');
+const OK_LINK = /^[A-Za-z0-9_-]{20,120}$/.test(DEPLOY || '') && /^[A-Za-z0-9_-]{8,64}$/.test(KEY || '');
+const ENDPOINT = OK_LINK ? 'https://script.google.com/macros/s/' + DEPLOY + '/exec' : '';
+const FORCE_MS = 10000;  // 確定しないまま話が続いたら、ここで区切って確定させる
+const BROWSER = (() => { const u = navigator.userAgent; const os = /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'other';
+  return (/Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : 'other') + ' / ' + os; })();
+let running = false, rec = null, pending = '', pendingSince = 0, lastHeard = 0, queue = [], flushing = false;
+let heard = 0, sent = 0, micState = 'stopped', micError = '', wake = null, seq = 0;
+const ERR_JA = {'not-allowed':'マイクが許可されていません', 'service-not-allowed':'音声認識が許可されていません', network:'音声認識の通信ができません',
+  'audio-capture':'マイクが見つかりません', 'language-not-supported':'日本語の音声認識が使えません'};
+
+function today() { const d = new Date(); return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+function name() { return $('who').value.replace(/[\x00-\x1f:：~]/g, '').trim().slice(0, 20); }
+function send(body) {
+  // Apps Script は別のサイトなので、答えは読めない（no-cors）。通信できたかどうかだけ分かる
+  return fetch(ENDPOINT, {method: 'POST', mode: 'no-cors', headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify(Object.assign({k: KEY, date: today(), speaker: name()}, body))});
+}
+async function flush() {
+  if (flushing) return;
+  flushing = true;
+  while (queue.length) {
+    try { await send(queue[0]); queue.shift(); sent++; }
+    catch (e) { setTimeout(flush, 3000); break; }
+  }
+  flushing = false;
+  showState();
+}
+function addSegment(text) {
+  text = text.trim();
+  if (!text) return;
+  queue.push({kind: 'seg', text, id: Date.now().toString(36) + '-' + (seq++) + '-' + Math.random().toString(36).slice(2, 6)});
+  const p = document.createElement('p'), t = document.createElement('time');
+  t.textContent = new Date().toTimeString().slice(0, 5); p.append(t, text); $('log').prepend(p);
+  flush();
+}
+function report() { if (OK_LINK && name()) send({kind: 'status', state: micState, error: micError, heard, sent, browser: BROWSER}).catch(() => {}); }
+function showState(text, cls) {
+  if (text) { $('state').textContent = text; $('state').className = cls || 'sub'; return; }
+  if (!running) { $('state').textContent = '停止中'; $('state').className = 'sub'; return; }
+  const quiet = Date.now() - lastHeard > 60000;
+  $('state').textContent = quiet ? '1分以上、声が入っていません（マイクを確かめてください）' : '聞いています' + (queue.length ? '（送信待ち ' + queue.length + ' 件）' : '');
+  $('state').className = quiet ? 'warn' : 'ok';
+}
+async function keepAwake() { try { if (navigator.wakeLock && running) wake = await navigator.wakeLock.request('screen'); } catch (e) {} }
+
+function startRec() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { running = false; ui(); showState('このブラウザは音声認識に対応していません。Google Chrome で開いてください', 'bad'); return; }
+  rec = new SR(); rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
+  rec.onresult = e => {
+    lastHeard = Date.now(); pending = ''; heard++; micError = '';
+    if ($('state').classList.contains('bad')) showState();
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) addSegment(r[0].transcript); else pending += r[0].transcript;
+    }
+    pendingSince = pending ? (pendingSince || Date.now()) : 0;
+    $('interim').textContent = pending;
+  };
+  rec.onerror = e => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    micError = e.error;
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') {
+      running = false; micState = 'blocked'; ui();
+      showState((ERR_JA[e.error] || 'マイクを使えません') + '。アドレス欄の左のマークから、マイクを「許可」にしてください', 'bad'); report(); return;
+    }
+    showState((ERR_JA[e.error] || '音声認識のエラー') + '（' + e.error + '）', 'bad'); report();
+  };
+  rec.onend = () => {
+    if (pending) { addSegment(pending); pending = ''; $('interim').textContent = ''; }
+    pendingSince = 0;
+    if (running) setTimeout(() => { if (running) startRec(); }, 100);
+  };
+  try { rec.start(); } catch (e) {}
+}
+function ui() { $('mic').textContent = running ? '文字起こしを止める' : '文字起こしを始める'; $('mic').classList.toggle('stop', running); $('who').disabled = running; }
+
+if (!OK_LINK) { $('badlink').hidden = false; $('panel').hidden = true; }
+try { $('who').value = localStorage.getItem('meeting-mic-name') || ''; } catch (e) {}
+$('mic').onclick = () => {
+  if (!running && !name()) { $('who').focus(); showState('先に名前を入れてください', 'warn'); return; }
+  try { localStorage.setItem('meeting-mic-name', name()); } catch (e) {}
+  running = !running; ui();
+  if (running) { lastHeard = Date.now(); micState = 'listening'; micError = ''; showState(); startRec(); keepAwake(); }
+  else { if (rec) rec.stop(); micState = 'stopped'; showState(); if (wake) { wake.release().catch(() => {}); wake = null; } }
+  report();
+};
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+setInterval(() => {
+  if (running && rec && pendingSince && Date.now() - pendingSince > FORCE_MS) { pendingSince = 0; try { rec.stop(); } catch (e) {} }
+  if (running && !$('state').classList.contains('bad')) showState();
+}, 1000);
+setInterval(() => { if (running) report(); }, 20000);
+</script>
+</body>
+</html>
