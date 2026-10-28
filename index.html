@@ -20,8 +20,12 @@ main { max-width:1100px; margin:0 auto; padding:24px 16px; }
 @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
 .grid section { margin-top:0; }
 h2 { font-size:14px; margin:0 0 8px; color:var(--sub); font-weight:600; }
-#topicNow { font-size:18px; font-weight:600; overflow-wrap:anywhere; }
+#topicNow { font-size:18px; font-weight:600; overflow-wrap:anywhere; white-space:pre-wrap; }
 #advice { display:flex; flex-direction:column; gap:12px; }
+.tbar { height:12px; border-radius:6px; background:var(--line); overflow:hidden; margin:8px 0 2px; }
+.tbar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .8s linear; }
+.tbar.near > i { background:var(--warn); } .tbar.over > i { background:var(--bad); }
+#facilLeft { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; } #facilLeft.near { color:var(--warn); } #facilLeft.over { color:var(--bad); }
 .card { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:12px 14px; }
 .card .ans { white-space:pre-wrap; overflow-wrap:anywhere; font-size:17px; line-height:1.7; }
 #feed { max-height:50vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
@@ -65,11 +69,13 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
 
   <div id="boardArea" hidden>
   <section style="margin-bottom:16px"><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
+    <div id="facilClock" hidden><div class="tbar" id="facilBar"><i></i></div><span id="facilLeft"></span></div>
     <div id="boardState" class="sub"></div></section>
   <div class="grid">
     <section><h2>全員の発言</h2><div id="feed"><div class="sub">（まだありません）</div></div></section>
     <div style="display:flex;flex-direction:column;gap:16px">
       <section><h2>クロエの助言</h2><div id="advice"><div class="sub">（まだありません）</div></div></section>
+      <section id="plBox" hidden><h2 id="plTitle">PL の分析</h2><div id="plBody" class="ans" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7"></div></section>
       <section><h2>議題・決定・宿題</h2><ul id="marks"></ul></section>
     </div>
   </div>
@@ -122,9 +128,33 @@ async function flush() {
 function addSegment(text) {
   text = text.trim();
   if (!text) return;
-  queue.push({kind: 'seg', text, id: Date.now().toString(36) + '-' + (seq++) + '-' + Math.random().toString(36).slice(2, 6)});
+  const level = uttLevel();
+  queue.push({kind: 'seg', text, level, id: Date.now().toString(36) + '-' + (seq++) + '-' + Math.random().toString(36).slice(2, 6)});
   flush();
 }
+// 声の大きさ（音声認識とは別にマイクを開いて測る。測れなくても文字起こしは続ける）
+// 10/28：前の発言から今までのいちばん大きい音では、本人の声とほかの人の声の差が出なかった（中央値が同じ）。
+// 今の発言が聞こえ始めてからの 0.1 秒ごとの音の、上から1割の大きさを使う
+let meter = null, frames = [], uttStart = 0;
+function uttLevel() {
+  const from = (uttStart || Date.now() - 5000) - 500, v = frames.filter(f => f[0] >= from).map(f => f[1]).sort((a, b) => a - b);
+  uttStart = 0;
+  return meter && v.length ? Math.round(v[Math.floor(v.length * 0.9)] * 10) / 10 : undefined;
+}
+async function startMeter() {
+  if (meter || !navigator.mediaDevices) return;
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({audio: true});
+    const ac = new AudioContext(), an = ac.createAnalyser(); an.fftSize = 1024;
+    ac.createMediaStreamSource(st).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    meter = {st, ac};
+    (function tick() { if (!meter) return; an.getFloatTimeDomainData(buf); let x = 0; for (const v of buf) x += v * v;
+      const t = Date.now(); frames.push([t, 10 * Math.log10(x / buf.length + 1e-12)]);
+      while (frames.length && frames[0][0] < t - 60000) frames.shift(); setTimeout(tick, 100); })();
+  } catch (e) { meter = null; }
+}
+function stopMeter() { if (meter) { meter.st.getTracks().forEach(t => t.stop()); meter.ac.close(); meter = null; } }
 function report() { if (OK_LINK && name()) send({kind: 'status', state: micState, error: micError, heard, sent, browser: BROWSER}).catch(() => {}); }
 function showState(text, cls) {
   if (text) { $('state').textContent = text; $('state').className = cls || 'sub'; return; }
@@ -142,6 +172,7 @@ function startRec() {
   rec.onresult = e => {
     lastHeard = Date.now(); pending = ''; heard++; micError = '';
     if ($('state').classList.contains('bad')) showState();
+    if (!uttStart) uttStart = Date.now() - 1000;  // 認識の結果は、話し始めから約1秒遅れて届く
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
       if (r.isFinal) addSegment(r[0].transcript); else pending += r[0].transcript;
@@ -168,7 +199,7 @@ function startRec() {
 function ui() { $('mic').textContent = running ? '文字起こしを止める' : '文字起こしを始める'; $('mic').classList.toggle('stop', running); $('who').disabled = running; }
 
 // ---- 全員の発言・助言（Mac の会議のクロエの画面の写しを、数秒おきに読む） ----
-const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', topic:'議題', decision:'決定', todo:'宿題'};
+const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', call:'呼びかけ', topic:'議題', decision:'決定', todo:'宿題', carry:'持ち越し'};
 let boardUpdated = '', boardFails = 0;
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function renderBoard(b) {
@@ -182,10 +213,37 @@ function renderBoard(b) {
   $('advice').replaceChildren(...(adv.length ? adv : [el('div', 'sub', '（まだありません）')]));
   $('marks').replaceChildren(...b.marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }));
   const topic = b.marks.filter(m => m.kind === 'topic').pop();
-  $('topicNow').textContent = topic ? topic.text : '（まだ始まっていません）'; $('topicNow').className = topic ? '' : 'sub';
+  const f = b.facil || {}, items = f.items || [];
+  facilNow = f.active && items[f.index] ? {started: f.item_started, minutes: items[f.index].minutes} : null;
+  facilClock();
+  if (f.active && items[f.index]) {
+    const cur = items[f.index], nxt = items[f.index + 1];
+    $('topicNow').textContent = (f.index + 1) + '/' + items.length + '　' + cur.title + (cur.decide ? '\n決めたいこと：' + cur.decide : '') + (nxt ? '\n次：' + nxt.title : '');
+    $('topicNow').className = '';
+  } else if (b.auto_topic && (!topic || b.auto_topic.since > (topic.iso || ''))) {
+    $('topicNow').textContent = b.auto_topic.text + '（自動）'; $('topicNow').className = '';
+  } else {
+    $('topicNow').textContent = topic ? topic.text : '（まだ始まっていません）'; $('topicNow').className = topic ? '' : 'sub';
+  }
+  const pl = b.pl || {};
+  $('plBox').hidden = !pl.analysis && pl.status !== 'running';
+  $('plTitle').textContent = 'PL の分析' + (pl.asof ? '（' + (+pl.asof.slice(5, 7)) + '/' + (+pl.asof.slice(8, 10)) + '迄）' : '');
+  $('plBody').textContent = pl.analysis || 'PL を読み込んで分析しています…';
   const on = (b.members || []).filter(m => m.state === 'listening').map(m => m.name);
   $('boardState').textContent = on.length ? 'マイクを使っている人：' + on.join('、') : '';
 }
+// 進行中の議題の残り時間（色と数字だけ。Mac の画面と同じ：残り2割で黄、目安を過ぎたら赤）
+let facilNow = null;
+function facilClock() {
+  $('facilClock').hidden = !facilNow;
+  if (!facilNow) return;
+  const sec = (Date.now() - Date.parse(facilNow.started)) / 1000, lim = facilNow.minutes * 60, rate = sec / lim;
+  const cls = rate >= 1 ? 'over' : rate >= 0.8 ? 'near' : '', mmss = x => Math.floor(x / 60) + ':' + String(Math.floor(x % 60)).padStart(2, '0');
+  $('facilBar').className = 'tbar ' + cls; $('facilBar').firstChild.style.width = Math.min(100, rate * 100) + '%';
+  $('facilLeft').className = cls;
+  $('facilLeft').textContent = (rate >= 1 ? '+' + mmss(sec - lim) + ' 超過' : '残り ' + mmss(lim - sec)) + '（目安 ' + facilNow.minutes + '分）';
+}
+setInterval(facilClock, 1000);
 async function pollBoard() {
   try {
     const r = await fetch(ENDPOINT + '?' + new URLSearchParams({k: KEY, date: today(), view: 'board'}), {cache: 'no-store'});
@@ -204,8 +262,8 @@ $('mic').onclick = () => {
   if (!running && !name()) { $('who').focus(); showState('先に名前を入れてください', 'warn'); return; }
   try { localStorage.setItem('meeting-mic-name', name()); } catch (e) {}
   running = !running; ui();
-  if (running) { lastHeard = Date.now(); micState = 'listening'; micError = ''; showState(); startRec(); keepAwake(); }
-  else { if (rec) rec.stop(); micState = 'stopped'; showState(); if (wake) { wake.release().catch(() => {}); wake = null; } }
+  if (running) { lastHeard = Date.now(); micState = 'listening'; micError = ''; showState(); startRec(); startMeter(); keepAwake(); }
+  else { if (rec) rec.stop(); stopMeter(); micState = 'stopped'; showState(); if (wake) { wake.release().catch(() => {}); wake = null; } }
   report();
 };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
