@@ -28,6 +28,12 @@ h2 { font-size:14px; margin:0 0 8px; color:var(--sub); font-weight:600; }
 #facilLeft { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; } #facilLeft.near { color:var(--warn); } #facilLeft.over { color:var(--bad); }
 .card { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:12px 14px; }
 .card .ans { white-space:pre-wrap; overflow-wrap:anywhere; font-size:17px; line-height:1.7; }
+.card.new { background:color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+#toast { position:fixed; right:16px; bottom:16px; z-index:10; max-width:min(420px, calc(100vw - 32px)); padding:12px 16px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; }
+@media (prefers-color-scheme: dark) { #toast { color:#0d1a1a; } }
+label.inline { display:flex; align-items:center; gap:6px; font-weight:400; font-size:14px; margin:0; }
+button.small { width:auto; margin:0; padding:6px 12px; font-size:14px; }
+.opts { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-bottom:10px; }
 #feed { max-height:50vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
 #feed p { margin:0 0 4px; }
 #feed time, #marks time { color:var(--sub); font-size:12px; margin-right:6px; }
@@ -74,7 +80,9 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
   <div class="grid">
     <section><h2>全員の発言</h2><div id="feed"><div class="sub">（まだありません）</div></div></section>
     <div style="display:flex;flex-direction:column;gap:16px">
-      <section><h2>クロエの助言</h2><div id="advice"><div class="sub">（まだありません）</div></div></section>
+      <section><h2>クロエの助言</h2>
+        <div class="opts"><label class="inline"><input type="checkbox" id="ding" checked>新しい助言を音で知らせる</label><button id="notifyPerm" class="small" hidden>PC の通知を許可</button></div>
+        <div id="advice"><div class="sub">（まだありません）</div></div></section>
       <section id="plBox" hidden><h2 id="plTitle">PL の分析</h2><div id="plBody" class="ans" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7"></div></section>
       <section><h2>議題・決定・宿題</h2><ul id="marks"></ul></section>
     </div>
@@ -93,6 +101,7 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
   </section>
 
 </main>
+<div id="toast" hidden></div>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -200,17 +209,22 @@ function ui() { $('mic').textContent = running ? '文字起こしを止める' :
 
 // ---- 全員の発言・助言（Mac の会議のクロエの画面の写しを、数秒おきに読む） ----
 const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', call:'呼びかけ', topic:'議題', decision:'決定', todo:'宿題', carry:'持ち越し'};
-let boardUpdated = '', boardFails = 0;
+let boardUpdated = '', boardFails = 0, advSeen = null;
+const advNew = new Map(), advKey = a => [a.t, a.kind, a.question, a.answer.slice(0, 60)].join('|');
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function renderBoard(b) {
   const feed = $('feed'), stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
   feed.replaceChildren(...(b.segments.length ? b.segments.map(x => { const p = el('p'); p.append(el('time', '', x.t)); if (x.speaker) p.append(el('b', '', x.speaker)); p.append(document.createTextNode(x.text)); return p; })
     : [el('div', 'sub', '（まだありません）')]));
   if (stick) feed.scrollTop = feed.scrollHeight;
-  const adv = b.advice.slice().reverse().map(a => { const c = el('div', 'card'); c.append(el('div', 'sub', a.t + '　' + (LABEL[a.kind] || '') + (a.question ? '：' + a.question : '')));
+  const now = Date.now(), fresh = advSeen ? b.advice.filter(a => a.ok && !advSeen.has(advKey(a))) : [];  // 開いた時点の助言は知らせない
+  fresh.forEach(a => advNew.set(advKey(a), now));
+  advSeen = new Set(b.advice.map(advKey));
+  const adv = b.advice.slice().reverse().map(a => { const c = el('div', 'card' + (now - (advNew.get(advKey(a)) || 0) < 30000 ? ' new' : '')); c.append(el('div', 'sub', a.t + '　' + (LABEL[a.kind] || '') + (a.question ? '：' + a.question : '')));
     c.append(el('div', 'ans', a.ok ? a.answer : '答えを出せませんでした')); return c; });
   if (b.busy) adv.unshift(el('div', 'sub', 'クロエが考えています…'));
   $('advice').replaceChildren(...(adv.length ? adv : [el('div', 'sub', '（まだありません）')]));
+  if (fresh.length) notifyAdvice(fresh[fresh.length - 1]);
   $('marks').replaceChildren(...b.marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }));
   const topic = b.marks.filter(m => m.kind === 'topic').pop();
   const f = b.facil || {}, items = f.items || [];
@@ -232,6 +246,42 @@ function renderBoard(b) {
   const on = (b.members || []).filter(m => m.state === 'listening').map(m => m.name);
   $('boardState').textContent = on.length ? 'マイクを使っている人：' + on.join('、') : '';
 }
+// ---- 新しい助言の知らせ（2026-10-29・健一さんの要望）：音・色・右下の知らせ。別のタブや窓を見ているときは、タブの題名と PC の通知も。音は「通知音」で切り替え、この PC に残す ----
+const TITLE = document.title;
+let ding = null, unseen = 0, toastTimer = 0;
+try { $('ding').checked = localStorage.getItem('meeting-ding') !== '0'; } catch (e) {}
+function unlockSound() { try { if (!ding) ding = new AudioContext(); if (ding.state === 'suspended') ding.resume(); } catch (e) {} }
+document.addEventListener('pointerdown', unlockSound);  // Chrome は、ページを一度クリックするまで音を鳴らさせない
+function chime() {
+  if (!ding || ding.state !== 'running') return;
+  const t = ding.currentTime;
+  [[880, 0], [1320, 0.16]].forEach(([f, d]) => {
+    const o = ding.createOscillator(), g = ding.createGain();
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.25, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.6);
+    o.connect(g); g.connect(ding.destination); o.start(t + d); o.stop(t + d + 0.65);
+  });
+}
+$('ding').onchange = () => {
+  try { localStorage.setItem('meeting-ding', $('ding').checked ? '1' : '0'); } catch (e) {}
+  if ($('ding').checked) { unlockSound(); if (ding) ding.resume().then(chime).catch(() => {}); }  // 試しに1回鳴らす
+};
+function permUi() { $('notifyPerm').hidden = !(window.Notification && Notification.permission === 'default'); }
+$('notifyPerm').onclick = () => Notification.requestPermission().then(permUi, permUi);
+permUi();
+function notifyAdvice(a) {
+  const what = 'クロエの' + (a.kind === 'watch' ? '気づき' : (LABEL[a.kind] || '助言'));
+  if ($('ding').checked) chime();
+  $('toast').textContent = what + 'が届きました（押すと表示）'; $('toast').hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 15000);
+  if (document.hidden) {
+    document.title = '（' + (++unseen) + '）' + TITLE;
+    if (window.Notification && Notification.permission === 'granted') try { new Notification(what, {body: String(a.answer || '').slice(0, 140), tag: 'chloe-advice'}); } catch (e) {}
+  }
+}
+$('toast').onclick = () => { $('toast').hidden = true; $('advice').scrollIntoView({behavior: 'smooth', block: 'start'}); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { unseen = 0; document.title = TITLE; } });
+
 // 進行中の議題の残り時間（色と数字だけ。Mac の画面と同じ：残り2割で黄、目安を過ぎたら赤）
 let facilNow = null;
 function facilClock() {
