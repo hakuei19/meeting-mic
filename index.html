@@ -113,7 +113,10 @@ const FORCE_MS = 10000;  // 確定しないまま話が続いたら、ここで�
 const BROWSER = (() => { const u = navigator.userAgent; const os = /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'other';
   return (/Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : 'other') + ' / ' + os; })();
 let running = false, rec = null, pending = '', pendingSince = 0, lastHeard = 0, queue = [], flushing = false;
-let heard = 0, sent = 0, micState = 'stopped', micError = '', wake = null, seq = 0;
+let heard = 0, sent = 0, micState = 'stopped', micError = '', wake = null, seq = 0, netFails = 0;
+// 「network」＝ブラウザの音声認識が、その会社のサーバー（Chrome は Google・Edge は Microsoft）につながらない（2026-11-04 の本番で2名）。
+// すぐにやり直し続けず、間をあけてやり直し、画面に直し方を出す
+const NET_HELP = '音声認識のサーバーにつながりません（network）。① Chrome をいったん全部閉じて開き直す　② VPN・セキュリティソフトの「Web の保護」を一時的に切る　③ それでもだめなら、Microsoft Edge で同じ URL を開く';
 const ERR_JA = {'not-allowed':'マイクが許可されていません', 'service-not-allowed':'音声認識が許可されていません', network:'音声認識の通信ができません',
   'audio-capture':'マイクが見つかりません', 'language-not-supported':'日本語の音声認識が使えません'};
 
@@ -176,10 +179,10 @@ async function keepAwake() { try { if (navigator.wakeLock && running) wake = awa
 
 function startRec() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { running = false; ui(); showState('このブラウザは音声認識に対応していません。Google Chrome で開いてください', 'bad'); return; }
+  if (!SR || navigator.brave) { running = false; ui(); showState('このブラウザでは音声認識が使えません。Google Chrome か Microsoft Edge で開いてください', 'bad'); micState = 'unsupported'; report(); return; }
   rec = new SR(); rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
   rec.onresult = e => {
-    lastHeard = Date.now(); pending = ''; heard++; micError = '';
+    lastHeard = Date.now(); pending = ''; heard++; micError = ''; netFails = 0;
     if ($('state').classList.contains('bad')) showState();
     if (!uttStart) uttStart = Date.now() - 1000;  // 認識の結果は、話し始めから約1秒遅れて届く
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -196,12 +199,14 @@ function startRec() {
       running = false; micState = 'blocked'; ui();
       showState((ERR_JA[e.error] || 'マイクを使えません') + '。アドレス欄の左のマークから、マイクを「許可」にしてください', 'bad'); report(); return;
     }
-    showState((ERR_JA[e.error] || '音声認識のエラー') + '（' + e.error + '）', 'bad'); report();
+    if (e.error === 'network') netFails++;
+    showState(e.error === 'network' ? NET_HELP + (netFails > 1 ? '（やり直し ' + netFails + ' 回目）' : '') : (ERR_JA[e.error] || '音声認識のエラー') + '（' + e.error + '）', 'bad'); report();
   };
   rec.onend = () => {
     if (pending) { addSegment(pending); pending = ''; $('interim').textContent = ''; }
     pendingSince = 0;
-    if (running) setTimeout(() => { if (running) startRec(); }, 100);
+    const wait = micError === 'network' ? Math.min(15000, 1000 * 2 ** Math.min(netFails - 1, 4)) : 100;  // 1・2・4・8・15秒
+    if (running) setTimeout(() => { if (running) startRec(); }, wait);
   };
   try { rec.start(); } catch (e) {}
 }
