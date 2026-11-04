@@ -241,7 +241,7 @@ function renderBoard(b) {
   }
   const pl = b.pl || {};
   $('plBox').hidden = !pl.analysis && pl.status !== 'running';
-  $('plTitle').textContent = 'PL の分析' + (pl.asof ? '（' + (+pl.asof.slice(5, 7)) + '/' + (+pl.asof.slice(8, 10)) + '迄）' : '');
+  $('plTitle').textContent = 'PL の分析' + (pl.asof ? '（' + (+pl.asof.slice(5, 7)) + '/' + (+pl.asof.slice(8, 10)) + '迄' + (pl.last_month ? '・前月 ' + (+pl.last_month.asof.slice(5, 7)) + '/' + (+pl.last_month.asof.slice(8, 10)) + '迄' + (pl.last_month.closed ? '' : '・締め前') : '') + '）' : '');
   $('plBody').textContent = pl.analysis || 'PL を読み込んで分析しています…';
   const on = (b.members || []).filter(m => m.state === 'listening').map(m => m.name);
   $('boardState').textContent = on.length ? 'マイクを使っている人：' + on.join('、') : '';
