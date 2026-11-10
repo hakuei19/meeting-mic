@@ -213,7 +213,7 @@ function startRec() {
 function ui() { $('mic').textContent = running ? '文字起こしを止める' : '文字起こしを始める'; $('mic').classList.toggle('stop', running); $('who').disabled = running; }
 
 // ---- 全員の発言・助言（Mac の会議のクロエの画面の写しを、数秒おきに読む） ----
-const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', call:'呼びかけ', topic:'議題', decision:'決定', todo:'宿題', carry:'持ち越し'};
+const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め残しの確認', watch:'気づき（自動）', call:'呼びかけ', topic:'議題', decision:'決定', todo:'宿題', carry:'持ち越し', skip:'飛ばした'};
 let boardUpdated = '', boardFails = 0, advSeen = null;
 const advNew = new Map(), advKey = a => [a.t, a.kind, a.question, a.answer.slice(0, 60)].join('|');
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
