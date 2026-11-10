@@ -54,6 +54,9 @@ button.stop { background:var(--bad); }
 #state { margin-top:12px; font-size:16px; }
 #interim { color:var(--sub); min-height:1.6em; font-size:14px; margin-top:6px; }
 ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
+#agendaBox { margin-top:12px; } #agendaBox summary { cursor:pointer; font-weight:600; }
+#agendaList { margin:6px 0 0; padding-left:24px; font-size:13px; } #agendaList li { padding:3px 0; overflow-wrap:anywhere; }
+#agendaList li.done { color:var(--sub); } #agendaList li.cur { font-weight:700; color:var(--accent); }
 </style>
 </head>
 <body>
@@ -76,7 +79,7 @@ ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
   <div id="boardArea" hidden>
   <section style="margin-bottom:16px"><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
     <div id="facilClock" hidden><div class="tbar" id="facilBar"><i></i></div><span id="facilLeft"></span></div>
-    <div id="boardState" class="sub"></div></section>
+<details id="agendaBox" open><summary>議題の一覧 <span id="agendaCount" class="sub"></span></summary><ol id="agendaList"></ol></details>    <div id="boardState" class="sub"></div></section>
   <div class="grid">
     <section><h2>全員の発言</h2><div id="feed"><div class="sub">（まだありません）</div></div></section>
     <div style="display:flex;flex-direction:column;gap:16px">
@@ -217,6 +220,19 @@ const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め�
 let boardUpdated = '', boardFails = 0, advSeen = null;
 const advNew = new Map(), advKey = a => [a.t, a.kind, a.question, a.answer.slice(0, 60)].join('|');
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+// ---- 議題の一覧（アジェンダから取り込んだ議題。済み・今・これから。健一さん 2026-11-10） ----
+function renderAgenda(f) {
+  const box = document.getElementById('agendaList'); if (!box) return;
+  const items = (f && f.items) || [], on = !!(f && f.active), idx = on ? f.index : -1;
+  document.getElementById('agendaCount').textContent = items.length ? '（' + items.length + ' 件・目安 ' + items.reduce((a, i) => a + i.minutes, 0) + ' 分）' : '（アジェンダの写しがありません）';
+  const key = JSON.stringify([items.map(i => i.title), idx]);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.replaceChildren(...items.map((it, n) => {
+    const li = el('li', n < idx ? 'done' : n === idx ? 'cur' : '', (n < idx ? '✓ ' : n === idx ? '▶ ' : '') + it.title + (it.owner ? '（' + it.owner + '）' : ''));
+    li.append(el('span', 'sub', '　' + it.minutes + ' 分')); return li;
+  }));
+}
 function renderBoard(b) {
   const feed = $('feed'), stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
   feed.replaceChildren(...(b.segments.length ? b.segments.map(x => { const p = el('p'); p.append(el('time', '', x.t)); if (x.speaker) p.append(el('b', '', x.speaker)); p.append(document.createTextNode(x.text)); return p; })
@@ -233,6 +249,7 @@ function renderBoard(b) {
   $('marks').replaceChildren(...b.marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }));
   const topic = b.marks.filter(m => m.kind === 'topic').pop();
   const f = b.facil || {}, items = f.items || [];
+  renderAgenda(f);
   facilNow = f.active && items[f.index] ? {started: f.item_started, minutes: items[f.index].minutes} : null;
   facilClock();
   if (f.active && items[f.index]) {
