@@ -59,7 +59,8 @@ label.inline { display:flex; align-items:center; gap:6px; font-size:14px; color:
 #boardState { margin-top:8px; }
 
 #agendaList { margin:0; padding-left:0; list-style:none; counter-reset:ag; font-size:16px; }
-#agendaList li { counter-increment:ag; display:flex; gap:10px; align-items:baseline; padding:8px 10px; border-radius:8px; overflow-wrap:anywhere; }
+#agendaList li { counter-increment:ag; display:grid; grid-template-columns:1.6em minmax(0,1fr); column-gap:10px; align-items:baseline; padding:8px 10px; border-radius:8px; overflow-wrap:anywhere; }
+#agendaList li > .prog { grid-column:2; }
 #agendaList li::before { content:counter(ag); min-width:1.6em; text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; font-size:14px; }
 #agendaList li + li { border-top:1px solid var(--line); }
 #agendaList li .t { flex:1; } #agendaList li .m { color:var(--sub); font-size:13px; white-space:nowrap; }
@@ -86,6 +87,18 @@ ul.help { margin:0; padding-left:20px; font-size:14px; }
 
 #toast { position:fixed; right:16px; bottom:16px; z-index:10; max-width:min(420px, calc(100vw - 32px)); padding:12px 16px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; }
 @media (prefers-color-scheme: dark) { #toast { color:#0d1a1a; } }
+
+/* 議題ごとの進捗（会議前に取り込んだ D・E・F 列） */
+#agendaList li .head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+#agendaList li .head.can { cursor:pointer; }
+#agendaList li .badge { font-size:11px; font-weight:700; color:var(--accent); border:1px solid var(--accent); border-radius:999px; padding:0 6px; }
+.prog, .curprog { margin:6px 0 2px; display:flex; flex-direction:column; gap:4px; font-weight:400; }
+.prog .pr, .curprog .pr { display:flex; gap:8px; font-size:14px; line-height:1.6; color:var(--ink); }
+.prog .k, .curprog .k { flex:none; min-width:4.5em; color:var(--sub); font-size:12px; font-weight:700; padding-top:2px; }
+.prog .v, .curprog .v { white-space:pre-wrap; overflow-wrap:anywhere; }
+.prog .pr.pre .v, .curprog .pr.pre .v { font-weight:600; }
+.curprog { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+.curprog .pr { font-size:15px; }
 </style>
 </head>
 <body>
@@ -114,6 +127,7 @@ ul.help { margin:0; padding-left:20px; font-size:14px; }
     <div class="col side">
       <section><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
         <div id="facilClock" hidden><div class="tbar" id="facilBar"><i></i></div><span id="facilLeft"></span></div>
+        <div id="curProg" class="curprog" hidden></div>
         <div id="boardState" class="sub"></div></section>
       <section id="agendaBox"><h2>議題の一覧 <span id="agendaCount" class="sub" style="font-weight:400"></span></h2><ol id="agendaList"></ol></section>
       <section><h2>決定・宿題</h2><ul id="marks"></ul></section>
@@ -251,17 +265,35 @@ const LABEL = {judge:'判定', research:'調査', ask:'質問', closing:'決め�
 let boardUpdated = '', boardFails = 0, advSeen = null;
 const advNew = new Map(), advKey = a => [a.t, a.kind, a.question, a.answer.slice(0, 60)].join('|');
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
-// ---- 議題の一覧（アジェンダから取り込んだ議題。済み・今・これから。健一さん 2026-11-10） ----
+// ---- 議題の一覧（アジェンダから取り込んだ議題。済み・今・これから。健一さん 2026-11-10）。
+//      議題を押すと、会議前に取り込んだ進捗（期限・事前記入・前回の内容）を開く。今の議題の進捗は「今の議題」の欄に出す（2026-11-25） ----
+const agendaOpen = new Set();
+function progressBox(it, cls) {
+  const box = el('div', cls || 'prog');
+  [['事前記入', it.pre, 'pre'], ['前回', it.prev, ''], ['期限', it.due, '']].forEach(([k, v, c]) => {
+    if (!v) return;
+    const row = el('div', 'pr ' + c); row.append(el('span', 'k', k), el('span', 'v', v)); box.append(row);
+  });
+  if (!box.childNodes.length) box.append(el('div', 'sub', it.decide ? '（取り込んだ進捗はありません）' : ''));
+  return box;
+}
 function renderAgenda(f) {
   const box = document.getElementById('agendaList'); if (!box) return;
   const items = (f && f.items) || [], on = !!(f && f.active), idx = on ? f.index : -1;
-  document.getElementById('agendaCount').textContent = items.length ? '（' + items.length + ' 件・目安 ' + items.reduce((a, i) => a + i.minutes, 0) + ' 分）' : '（アジェンダの写しがありません）';
-  const key = JSON.stringify([items.map(i => i.title), idx]);
+  document.getElementById('agendaCount').textContent = items.length ? '（' + items.length + ' 件・目安 ' + items.reduce((a, i) => a + i.minutes, 0) + ' 分・押すと進捗）' : '（アジェンダの写しがありません）';
+  const key = JSON.stringify([items, idx, [...agendaOpen]]);
   if (box.dataset.key === key) return;
   box.dataset.key = key;
   box.replaceChildren(...items.map((it, n) => {
     const li = el('li', n < idx ? 'done' : n === idx ? 'cur' : '');
-    li.append(el('span', 't', (n === idx ? '▶ ' : '') + it.title + (it.owner ? '（' + it.owner + '）' : '')), el('span', 'm', (n < idx ? '済み' : it.minutes + ' 分'))); return li;
+    const head = el('div', 'head');
+    head.append(el('span', 't', (n === idx ? '▶ ' : '') + it.title + (it.owner ? '（' + it.owner + '）' : '')), el('span', 'm', n < idx ? '済み' : it.minutes + ' 分'));
+    const has = it.pre || it.prev || it.due;
+    if (has) { head.classList.add('can'); head.onclick = () => { agendaOpen.has(it.title) ? agendaOpen.delete(it.title) : agendaOpen.add(it.title); renderAgenda(f); }; }
+    if (it.pre) head.insertBefore(el('span', 'badge', '事前記入'), head.lastChild);
+    li.append(head);
+    if (has && agendaOpen.has(it.title)) li.append(progressBox(it));
+    return li;
   }));
 }
 function renderBoard(b) {
@@ -282,12 +314,14 @@ function renderBoard(b) {
   const topic = b.marks.filter(m => m.kind === 'topic').pop();
   const f = b.facil || {}, items = f.items || [];
   renderAgenda(f);
+  if (!(f.active && items[f.index])) $('curProg').hidden = true;
   facilNow = f.active && items[f.index] ? {started: f.item_started, minutes: items[f.index].minutes} : null;
   facilClock();
   if (f.active && items[f.index]) {
     const cur = items[f.index], nxt = items[f.index + 1];
     $('topicNow').textContent = (f.index + 1) + '/' + items.length + '　' + cur.title + (cur.decide ? '\n決めたいこと：' + cur.decide : '') + (nxt ? '\n次：' + nxt.title : '');
     $('topicNow').className = '';
+    const cp = progressBox(cur, 'curprog'); $('curProg').replaceWith(cp); cp.id = 'curProg'; cp.hidden = !(cur.pre || cur.prev || cur.due);
   } else if (b.auto_topic && (!topic || b.auto_topic.since > (topic.iso || ''))) {
     $('topicNow').textContent = b.auto_topic.text + '（自動）'; $('topicNow').className = '';
   } else {
