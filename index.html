@@ -15,93 +15,124 @@
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
-main { max-width:1100px; margin:0 auto; padding:24px 16px; }
-.grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:16px; }
-@media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
-.grid section { margin-top:0; }
-h2 { font-size:14px; margin:0 0 8px; color:var(--sub); font-weight:600; }
-#topicNow { font-size:18px; font-weight:600; overflow-wrap:anywhere; white-space:pre-wrap; }
+main { max-width:1400px; margin:0 auto; padding:12px 16px 24px; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+h2 { font-size:15px; margin:0 0 10px; color:var(--sub); font-weight:700; letter-spacing:.02em; }
+.sub { color:var(--sub); font-size:14px; }
+.warn { color:var(--warn); font-weight:600; } .bad { color:var(--bad); font-weight:600; } .ok { color:var(--accent); font-weight:600; }
+
+/* 上の細い帯：名前・マイク・状態（一度始めたら見なくてよいので小さく） */
+#panel { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:10px 14px; }
+#panel .title { font-weight:700; font-size:16px; margin-right:4px; }
+#panel label { font-size:14px; color:var(--sub); margin:0; }
+input[type=text] { width:9em; padding:7px 10px; font:inherit; font-size:16px; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; }
+button { margin:0; padding:8px 16px; font:inherit; font-size:15px; font-weight:700; color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; }
+button.stop { background:var(--bad); }
+button.small { padding:5px 10px; font-size:13px; }
+@media (prefers-color-scheme: dark) { button { color:#0d1a1a; } }
+#state { font-size:14px; }
+#interim { color:var(--sub); font-size:13px; flex-basis:100%; min-height:0; }
+#interim:empty { display:none; }
+
+/* 本体：左＝クロエの助言（大きく）、右＝今の議題と議題の一覧 */
+.grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(320px,2fr); gap:16px; margin-top:12px; align-items:start; }
+@media (max-width: 900px) { .grid { grid-template-columns:1fr; } .side { order:-1; } }
+.col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.side { position:sticky; top:12px; }
+@media (max-width: 900px) { .side { position:static; } }
+
 #advice { display:flex; flex-direction:column; gap:12px; }
-.tbar { height:12px; border-radius:6px; background:var(--line); overflow:hidden; margin:8px 0 2px; }
+.card { border:1px solid var(--line); border-left:5px solid var(--accent); border-radius:10px; padding:12px 16px; }
+.card .ans { white-space:pre-wrap; overflow-wrap:anywhere; font-size:16px; line-height:1.75; }
+.card.latest { padding:16px 20px; }
+.card.latest .ans { font-size:20px; line-height:1.8; }
+.card.new { background:color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.card .meta { color:var(--sub); font-size:13px; margin-bottom:4px; }
+.opts { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin-bottom:12px; }
+label.inline { display:flex; align-items:center; gap:6px; font-size:14px; color:var(--sub); }
+
+#topicNow { font-size:22px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap; }
+.tbar { height:12px; border-radius:6px; background:var(--line); overflow:hidden; margin:10px 0 2px; }
 .tbar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .8s linear; }
 .tbar.near > i { background:var(--warn); } .tbar.over > i { background:var(--bad); }
-#facilLeft { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; } #facilLeft.near { color:var(--warn); } #facilLeft.over { color:var(--bad); }
-.card { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:12px 14px; }
-.card .ans { white-space:pre-wrap; overflow-wrap:anywhere; font-size:17px; line-height:1.7; }
-.card.new { background:color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+#facilLeft { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; } #facilLeft.near { color:var(--warn); } #facilLeft.over { color:var(--bad); }
+#boardState { margin-top:8px; }
+
+#agendaList { margin:0; padding-left:0; list-style:none; counter-reset:ag; font-size:16px; }
+#agendaList li { counter-increment:ag; display:flex; gap:10px; align-items:baseline; padding:8px 10px; border-radius:8px; overflow-wrap:anywhere; }
+#agendaList li::before { content:counter(ag); min-width:1.6em; text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; font-size:14px; }
+#agendaList li + li { border-top:1px solid var(--line); }
+#agendaList li .t { flex:1; } #agendaList li .m { color:var(--sub); font-size:13px; white-space:nowrap; }
+#agendaList li.done { color:var(--sub); } #agendaList li.done .t { text-decoration:line-through; text-decoration-color:var(--line); }
+#agendaList li.cur { background:color-mix(in srgb, var(--accent) 16%, var(--panel)); color:var(--ink); font-weight:700; border-top-color:transparent; }
+#agendaList li.cur::before { color:var(--accent); }
+#agendaList li.cur + li { border-top-color:transparent; }
+
+#marks { margin:0; padding:0; list-style:none; font-size:15px; }
+#marks li { padding:4px 0; overflow-wrap:anywhere; }
+#marks time, #feed time { color:var(--sub); font-size:12px; margin-right:6px; }
+
+/* たたんでおく欄：PL・全員の発言・使い方 */
+details.fold > summary { cursor:pointer; font-size:15px; font-weight:700; color:var(--sub); list-style:none; }
+details.fold > summary::-webkit-details-marker { display:none; }
+details.fold > summary::before { content:'▸ '; } details.fold[open] > summary::before { content:'▾ '; }
+details.fold[open] > summary { margin-bottom:10px; }
+#plBody { white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.7; }
+#feed { max-height:40vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
+#feed p { margin:0 0 4px; }
+#feed b { color:var(--accent); margin-right:6px; }
+ul.help { margin:0; padding-left:20px; font-size:14px; }
+.bottom { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
+
 #toast { position:fixed; right:16px; bottom:16px; z-index:10; max-width:min(420px, calc(100vw - 32px)); padding:12px 16px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; }
 @media (prefers-color-scheme: dark) { #toast { color:#0d1a1a; } }
-label.inline { display:flex; align-items:center; gap:6px; font-weight:400; font-size:14px; margin:0; }
-button.small { width:auto; margin:0; padding:6px 12px; font-size:14px; }
-.opts { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-bottom:10px; }
-#feed { max-height:50vh; overflow-y:auto; font-size:14px; overflow-wrap:anywhere; }
-#feed p { margin:0 0 4px; }
-#feed time, #marks time { color:var(--sub); font-size:12px; margin-right:6px; }
-#feed b { color:var(--accent); margin-right:6px; }
-#marks { margin:0; padding:0; list-style:none; font-size:14px; }
-#marks li { padding:3px 0; overflow-wrap:anywhere; }
-h1 { font-size:22px; margin:0 0 4px; }
-.sub { color:var(--sub); font-size:14px; }
-.warn { color:var(--warn); font-weight:600; }
-.bad { color:var(--bad); font-weight:600; }
-.ok { color:var(--accent); font-weight:600; }
-section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
-label { display:block; font-weight:600; margin-bottom:6px; }
-input[type=text] { width:100%; padding:12px; font:inherit; font-size:18px; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; }
-button { width:100%; margin-top:12px; padding:14px; font:inherit; font-size:18px; font-weight:700; color:#fff; background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
-button.stop { background:var(--bad); }
-@media (prefers-color-scheme: dark) { button { color:#0d1a1a; } }
-#state { margin-top:12px; font-size:16px; }
-#interim { color:var(--sub); min-height:1.6em; font-size:14px; margin-top:6px; }
-ul { margin:6px 0 0; padding-left:20px; font-size:14px; }
-#agendaBox { margin-top:12px; } #agendaBox summary { cursor:pointer; font-weight:600; }
-#agendaList { margin:6px 0 0; padding-left:24px; font-size:13px; } #agendaList li { padding:3px 0; overflow-wrap:anywhere; }
-#agendaList li.done { color:var(--sub); } #agendaList li.cur { font-weight:700; color:var(--accent); }
 </style>
 </head>
 <body>
 <main>
-  <h1>会議のマイク</h1>
-  <div class="sub">自分の声を、名前つきで文字にして会議の記録へ送ります。全員の発言とクロエの助言も、ここで見られます。</div>
-
   <section id="badlink" hidden>
     <div class="bad">このページの URL が足りません。会議の担当者から届いた URL を、そのまま全部開いてください（「#」のあとまで含めて）。</div>
   </section>
 
   <section id="panel">
-    <label for="who">あなたの名前（名字だけで大丈夫です）</label>
+    <span class="title">会議のクロエ</span>
+    <label for="who">名前</label>
     <input type="text" id="who" maxlength="20" autocomplete="off" placeholder="例：大森">
     <button id="mic">文字起こしを始める</button>
-    <div id="state" class="sub">停止中</div>
+    <span id="state" class="sub">停止中</span>
     <div id="interim"></div>
   </section>
 
   <div id="boardArea" hidden>
-  <section style="margin-bottom:16px"><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
-    <div id="facilClock" hidden><div class="tbar" id="facilBar"><i></i></div><span id="facilLeft"></span></div>
-<details id="agendaBox" open><summary>議題の一覧 <span id="agendaCount" class="sub"></span></summary><ol id="agendaList"></ol></details>    <div id="boardState" class="sub"></div></section>
   <div class="grid">
-    <section><h2>全員の発言</h2><div id="feed"><div class="sub">（まだありません）</div></div></section>
-    <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="col">
       <section><h2>クロエの助言</h2>
         <div class="opts"><label class="inline"><input type="checkbox" id="ding" checked>新しい助言を音で知らせる</label><button id="notifyPerm" class="small" hidden>PC の通知を許可</button></div>
         <div id="advice"><div class="sub">（まだありません）</div></div></section>
-      <section id="plBox" hidden><h2 id="plTitle">PL の分析</h2><div id="plBody" class="ans" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7"></div></section>
-      <section><h2>議題・決定・宿題</h2><ul id="marks"></ul></section>
+      <section id="plBox" hidden><details class="fold"><summary id="plTitle">PL の分析</summary><div id="plBody"></div></details></section>
+    </div>
+    <div class="col side">
+      <section><h2>今の議題</h2><div id="topicNow" class="sub">（まだ始まっていません）</div>
+        <div id="facilClock" hidden><div class="tbar" id="facilBar"><i></i></div><span id="facilLeft"></span></div>
+        <div id="boardState" class="sub"></div></section>
+      <section id="agendaBox"><h2>議題の一覧 <span id="agendaCount" class="sub" style="font-weight:400"></span></h2><ol id="agendaList"></ol></section>
+      <section><h2>決定・宿題</h2><ul id="marks"></ul></section>
     </div>
   </div>
   </div>
 
-  <section>
-    <div class="sub" style="font-weight:600">使い方</div>
-    <ul>
-      <li>初めてのときは、マイクの使用を聞かれます。「許可する」を押してください。</li>
-      <li>会議の間は、このタブを開いたままにしてください（別のタブを見ても大丈夫です）。PC のふたは閉じないでください。</li>
-      <li>拾うのは、PC の近くで話した声だけです。ほかの人の声はほとんど入りません。</li>
-      <li>音声は、Chrome の音声認識の仕組みで Google に送られて文字になります。</li>
-      <li>全員の発言・クロエの助言は、数秒おくれて出ます。見るだけなら、文字起こしを始めなくても大丈夫です。</li>
-    </ul>
-  </section>
+  <div class="bottom">
+    <section id="feedBox" hidden><details class="fold"><summary>全員の発言（文字起こし）</summary><div id="feed"><div class="sub">（まだありません）</div></div></details></section>
+    <section><details class="fold"><summary>使い方</summary>
+      <ul class="help">
+        <li>名前を入れて「文字起こしを始める」を押すと、自分の声が名前つきで会議の記録へ送られます。見るだけなら、始めなくても大丈夫です。</li>
+        <li>初めてのときは、マイクの使用を聞かれます。「許可する」を押してください。</li>
+        <li>会議の間は、このタブを開いたままにしてください（別のタブを見ても大丈夫です）。PC のふたは閉じないでください。</li>
+        <li>拾うのは、PC の近くで話した声だけです。ほかの人の声はほとんど入りません。</li>
+        <li>音声は、Chrome の音声認識の仕組みで Google に送られて文字になります。</li>
+        <li>発言・クロエの助言は、数秒おくれて出ます。</li>
+      </ul></details></section>
+  </div>
 
 </main>
 <div id="toast" hidden></div>
@@ -229,8 +260,8 @@ function renderAgenda(f) {
   if (box.dataset.key === key) return;
   box.dataset.key = key;
   box.replaceChildren(...items.map((it, n) => {
-    const li = el('li', n < idx ? 'done' : n === idx ? 'cur' : '', (n < idx ? '✓ ' : n === idx ? '▶ ' : '') + it.title + (it.owner ? '（' + it.owner + '）' : ''));
-    li.append(el('span', 'sub', '　' + it.minutes + ' 分')); return li;
+    const li = el('li', n < idx ? 'done' : n === idx ? 'cur' : '');
+    li.append(el('span', 't', (n === idx ? '▶ ' : '') + it.title + (it.owner ? '（' + it.owner + '）' : '')), el('span', 'm', (n < idx ? '済み' : it.minutes + ' 分'))); return li;
   }));
 }
 function renderBoard(b) {
@@ -241,12 +272,13 @@ function renderBoard(b) {
   const now = Date.now(), fresh = advSeen ? b.advice.filter(a => a.ok && !advSeen.has(advKey(a))) : [];  // 開いた時点の助言は知らせない
   fresh.forEach(a => advNew.set(advKey(a), now));
   advSeen = new Set(b.advice.map(advKey));
-  const adv = b.advice.slice().reverse().map(a => { const c = el('div', 'card' + (now - (advNew.get(advKey(a)) || 0) < 30000 ? ' new' : '')); c.append(el('div', 'sub', a.t + '　' + (LABEL[a.kind] || '') + (a.question ? '：' + a.question : '')));
+  const adv = b.advice.slice().reverse().map((a, n) => { const c = el('div', 'card' + (n === 0 ? ' latest' : '') + (now - (advNew.get(advKey(a)) || 0) < 30000 ? ' new' : '')); c.append(el('div', 'meta', a.t + '　' + (LABEL[a.kind] || '') + (a.question ? '：' + a.question : '')));
     c.append(el('div', 'ans', a.ok ? a.answer : '答えを出せませんでした')); return c; });
   if (b.busy) adv.unshift(el('div', 'sub', 'クロエが考えています…'));
   $('advice').replaceChildren(...(adv.length ? adv : [el('div', 'sub', '（まだありません）')]));
   if (fresh.length) notifyAdvice(fresh[fresh.length - 1]);
-  $('marks').replaceChildren(...b.marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }));
+  const marks = b.marks.filter(m => m.kind !== 'topic' && m.kind !== 'skip');
+  $('marks').replaceChildren(...(marks.length ? marks.slice().reverse().map(m => { const li = el('li'); li.append(el('time', '', m.t), document.createTextNode('【' + (LABEL[m.kind] || '') + '】' + m.text)); return li; }) : [el('li', 'sub', '（まだありません）')]));
   const topic = b.marks.filter(m => m.kind === 'topic').pop();
   const f = b.facil || {}, items = f.items || [];
   renderAgenda(f);
@@ -328,7 +360,7 @@ async function pollBoard() {
 }
 
 if (!OK_LINK) { $('badlink').hidden = false; $('panel').hidden = true; }
-else { $('boardArea').hidden = false; pollBoard(); setInterval(pollBoard, 4000); }
+else { $('boardArea').hidden = false; $('feedBox').hidden = false; pollBoard(); setInterval(pollBoard, 4000); }
 try { $('who').value = localStorage.getItem('meeting-mic-name') || ''; } catch (e) {}
 $('mic').onclick = () => {
   if (!running && !name()) { $('who').focus(); showState('先に名前を入れてください', 'warn'); return; }
